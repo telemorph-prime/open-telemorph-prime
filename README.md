@@ -52,23 +52,25 @@ open http://localhost:8080
 ### Option 3: Build from Source
 
 ```bash
-# Prerequisites: Go 1.24+
+# Prerequisites: Go 1.24+, Node.js 18+, npm
 git clone https://github.com/your-org/open-telemorph-prime.git
 cd open-telemorph-prime
 
-# Install dependencies
-go mod tidy
+# Install dependencies (Go and React UI)
+make deps
 
-# Build
-go build -o open-telemorph-prime .
+# Build (builds React UI first, then embeds it in Go binary)
+make build
 
 # Run
 ./open-telemorph-prime
 ```
 
+**Note:** The frontend is embedded into the Go binary during build, so you only need to deploy a single executable file.
+
 ## 📊 Features
 
-- **Single Binary**: One executable, zero configuration
+- **Single Binary**: One executable with embedded frontend, zero configuration
 - **Minimal Resource Usage**: Runs on any modern machine (<2GB RAM)
 - **OTLP Support**: Ingest traces, metrics, and logs via HTTP/gRPC
 - **Web UI**: Simple, responsive interface for data exploration
@@ -202,41 +204,68 @@ exporter, err := otlptracegrpc.New(
 
 ### Prerequisites
 - Go 1.24+
+- Node.js 18+ and npm (for building the React UI)
 - Docker (optional)
 - SQLite3 (for local development)
 
 ### Building
 
 ```bash
-# Install dependencies
-go mod tidy
+# Install all dependencies (Go and React UI)
+make deps
+# Or manually:
+# cd backend && go mod tidy
+# cd frontend && npm install
+
+# Build React UI and Go binary (frontend is embedded in binary)
+make build
+# Or manually:
+# cd frontend && npm run build
+# cd backend && go build -o ../open-telemorph-prime .
+
+# Build only the React UI (for UI development)
+make build-ui
 
 # Run tests
-go test ./...
-
-# Build binary
-go build -o open-telemorph-prime .
+make test
 
 # Run in development mode
-go run main.go -config config.yaml
+make dev
+
+# For React UI development (hot reload)
+cd frontend && npm run dev
 ```
 
 ### Project Structure
 
 ```
 open-telemorph-prime/
-├── main.go                 # Entry point
-├── internal/
-│   ├── config/            # Configuration management
-│   ├── ingestion/         # OTLP receivers
-│   ├── storage/           # SQLite storage
-│   └── web/               # Web UI and API
-├── web/                   # Static web assets
-│   ├── index.html
-│   └── static/
-├── config.yaml            # Default configuration
-├── Dockerfile
-└── docker-compose.yml
+├── backend/               # Go backend source code
+│   ├── main.go           # Entry point
+│   ├── internal/        # Internal packages
+│   │   ├── config/      # Configuration management
+│   │   ├── ingestion/   # OTLP receivers
+│   │   ├── storage/     # SQLite storage
+│   │   └── web/         # Web API handlers
+│   ├── go.mod            # Go dependencies
+│   └── go.sum            # Go dependencies checksum
+├── frontend/              # React frontend source code
+│   ├── public/          # Public static files
+│   │   └── index.html   # HTML entry point
+│   ├── src/             # React source code
+│   │   ├── components/  # React components
+│   │   │   ├── pages/   # Page components
+│   │   │   └── ui/      # UI component library
+│   │   ├── assets/      # Images and static assets
+│   │   └── styles/      # Global styles
+│   ├── dist/            # Built React app (generated, embedded in Go binary)
+│   ├── package.json     # Node.js dependencies
+│   ├── vite.config.ts   # Vite build configuration
+│   ├── tailwind.config.js # Tailwind CSS configuration
+│   └── tsconfig.json    # TypeScript configuration
+├── config.yaml           # Default configuration
+├── Dockerfile            # Docker build configuration
+└── docker-compose.yml    # Docker Compose configuration
 ```
 
 ## 📈 Performance

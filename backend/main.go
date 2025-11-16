@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"embed"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -21,8 +23,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+//go:embed all:../frontend/dist/*
+var frontendFS embed.FS
+
 var (
-	configPath = flag.String("config", "config.yaml", "Path to configuration file")
+	configPath = flag.String("config", "../config.yaml", "Path to configuration file")
 	version    = "0.2.1"
 )
 
@@ -63,9 +68,6 @@ func main() {
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
-
-	// Load HTML templates
-	router.LoadHTMLGlob("web/*.html")
 
 	// Register routes
 	registerRoutes(router, ingestionService, webService, dogfoodService, queryService)
@@ -165,18 +167,39 @@ func registerRoutes(router *gin.Engine, ingestionService *ingestion.Service, web
 	// OTLP endpoints are now served on dedicated ingestion ports (4317/4318)
 	// These are handled by the ingestion service directly
 
-	// Web UI
-	router.Static("/static", "./web/static")
-	router.StaticFile("/open-telemorph-logo.svg", "./web/open-telemorph-logo.svg")
-	router.GET("/", webService.Index)
-	router.GET("/dashboard", webService.Dashboard)
-	router.GET("/metrics", webService.MetricsPage)
-	router.GET("/traces", webService.TracesPage)
-	router.GET("/logs", webService.LogsPage)
-	router.GET("/services", webService.ServicesPage)
-	router.GET("/alerts", webService.AlertsPage)
-	router.GET("/query", webService.QueryPage)
-	router.GET("/admin", webService.AdminPage)
+	// Serve embedded React app
+	frontendDist, err := fs.Sub(frontendFS, "dist")
+	if err != nil {
+		log.Fatalf("Failed to create frontend filesystem: %v", err)
+	}
+	
+	// Serve static assets from embedded filesystem
+	router.StaticFS("/assets", http.FS(frontendDist))
+	
+	// Serve React SPA - catch all non-API routes and serve index.html
+	router.NoRoute(func(c *gin.Context) {
+		// Don't serve index.html for API routes
+		path := c.Request.URL.Path
+		if len(path) >= 4 && path[:4] == "/api" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+			return
+		}
+		// Serve React app index.html for all other routes (SPA routing)
+		indexFile, err := frontendDist.Open("index.html")
+		if err != nil {
+			c.String(http.StatusInternalServerError, "Frontend not found. Please build the frontend first.")
+			return
+		}
+		defer indexFile.Close()
+		
+		stat, err := indexFile.Stat()
+		if err != nil {
+			c.String(http.StatusInternalServerError, "Frontend not found")
+			return
+		}
+		
+		http.ServeContent(c.Writer, c.Request, "index.html", stat.ModTime(), indexFile)
+	})
 }
 
 func healthCheck(c *gin.Context) {

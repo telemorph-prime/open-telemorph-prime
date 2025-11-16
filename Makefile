@@ -10,10 +10,16 @@ VERSION=0.1.0
 # Default target
 all: build
 
-# Build the binary
-build:
+# Build the React UI
+build-ui:
+	@echo "🎨 Building React UI..."
+	cd frontend && npm install && npm run build
+	@echo "✅ UI build complete!"
+
+# Build the binary (builds frontend first, then embeds it in Go binary)
+build: build-ui
 	@echo "🔨 Building $(BINARY_NAME)..."
-	go build -o $(BINARY_NAME) .
+	cd backend && go build -o ../$(BINARY_NAME) .
 	@echo "✅ Build complete!"
 
 # Run the application
@@ -24,12 +30,12 @@ run: build
 # Run in development mode
 dev:
 	@echo "🔧 Running in development mode..."
-	go run main.go -config config.yaml
+	cd backend && go run main.go -config ../config.yaml
 
 # Run tests
 test:
 	@echo "🧪 Running tests..."
-	go test ./...
+	cd backend && go test ./...
 
 # Run the test script
 test-integration:
@@ -41,18 +47,21 @@ clean:
 	@echo "🧹 Cleaning up..."
 	rm -f $(BINARY_NAME)
 	rm -rf data/
+	rm -rf frontend/dist/
+	rm -rf frontend/node_modules/
 	@echo "✅ Clean complete!"
 
 # Install dependencies
 deps:
-	@echo "📦 Installing dependencies..."
-	go mod tidy
-	go mod download
+	@echo "📦 Installing Go dependencies..."
+	cd backend && go mod tidy && go mod download
+	@echo "📦 Installing React UI dependencies..."
+	cd frontend && npm install
 
 # Format code
 fmt:
 	@echo "🎨 Formatting code..."
-	go fmt ./...
+	cd backend && go fmt ./...
 
 # Lint code
 lint:
@@ -86,7 +95,7 @@ data-dir:
 	mkdir -p data
 
 # Setup development environment
-setup: deps data-dir
+setup: deps data-dir build-ui
 	@echo "⚙️ Setting up development environment..."
 	@echo "✅ Setup complete!"
 
@@ -94,7 +103,8 @@ setup: deps data-dir
 help:
 	@echo "Open-Telemorph-Prime Development Commands:"
 	@echo ""
-	@echo "  build           Build the binary"
+	@echo "  build           Build the React UI and Go binary"
+	@echo "  build-ui        Build only the React UI"
 	@echo "  run             Build and run the application"
 	@echo "  dev             Run in development mode"
 	@echo "  test            Run unit tests"

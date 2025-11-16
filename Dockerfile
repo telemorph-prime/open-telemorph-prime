@@ -4,21 +4,30 @@ FROM golang:${GO_VERSION}-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
-RUN apk add --no-cache git
+# Install dependencies for building
+RUN apk add --no-cache git nodejs npm
 
-# Copy go mod files
-COPY go.mod go.sum ./
+# Build React UI first
+COPY frontend/ ./frontend/
+WORKDIR /app/frontend
+RUN npm install && npm run build
+
+# Back to app root
+WORKDIR /app
+
+# Copy Go mod files
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
-# Copy source code (only necessary files)
-COPY main.go ./
-COPY internal/ ./internal/
-COPY web/ ./web/
+# Copy backend source code
+COPY backend/ ./backend/
+
+# Copy config
 COPY config.yaml ./
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o open-telemorph-prime .
+# Build the application (frontend/dist is embedded via go:embed)
+WORKDIR /app/backend
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ../open-telemorph-prime .
 
 # Final stage
 FROM alpine:latest
@@ -28,11 +37,8 @@ RUN apk --no-cache add ca-certificates sqlite wget
 
 WORKDIR /app
 
-# Copy the binary from builder stage
+# Copy the binary from builder stage (frontend is embedded)
 COPY --from=builder /app/open-telemorph-prime .
-
-# Copy web assets
-COPY --from=builder /app/web ./web
 
 # Copy default config
 COPY --from=builder /app/config.yaml .
