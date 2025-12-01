@@ -30,3 +30,4 @@ The build output goes to `dist/` which is embedded into the Go binary during the
 - `vite.config.ts` - Vite configuration
 - `tailwind.config.js` - Tailwind CSS configuration
 
+

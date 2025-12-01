@@ -5,6 +5,7 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -23,7 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed all:../frontend/dist/*
+//go:embed all:dist/*
 var frontendFS embed.FS
 
 var (
@@ -172,10 +173,16 @@ func registerRoutes(router *gin.Engine, ingestionService *ingestion.Service, web
 	if err != nil {
 		log.Fatalf("Failed to create frontend filesystem: %v", err)
 	}
-	
+
+	// Create sub-filesystem for assets directory
+	assetsFS, err := fs.Sub(frontendDist, "assets")
+	if err != nil {
+		log.Fatalf("Failed to create assets filesystem: %v", err)
+	}
+
 	// Serve static assets from embedded filesystem
-	router.StaticFS("/assets", http.FS(frontendDist))
-	
+	router.StaticFS("/assets", http.FS(assetsFS))
+
 	// Serve React SPA - catch all non-API routes and serve index.html
 	router.NoRoute(func(c *gin.Context) {
 		// Don't serve index.html for API routes
@@ -191,14 +198,15 @@ func registerRoutes(router *gin.Engine, ingestionService *ingestion.Service, web
 			return
 		}
 		defer indexFile.Close()
-		
-		stat, err := indexFile.Stat()
+
+		// Read file content into memory (needed because fs.File doesn't implement io.ReadSeeker)
+		content, err := io.ReadAll(indexFile)
 		if err != nil {
-			c.String(http.StatusInternalServerError, "Frontend not found")
+			c.String(http.StatusInternalServerError, "Failed to read frontend")
 			return
 		}
-		
-		http.ServeContent(c.Writer, c.Request, "index.html", stat.ModTime(), indexFile)
+
+		c.Data(http.StatusOK, "text/html; charset=utf-8", content)
 	})
 }
 

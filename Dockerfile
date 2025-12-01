@@ -22,6 +22,9 @@ RUN go mod download
 # Copy backend source code
 COPY backend/ ./backend/
 
+# Copy frontend dist into backend directory for embedding (needed for go:embed)
+RUN cp -r /app/frontend/dist /app/backend/dist
+
 # Copy config
 COPY config.yaml ./
 
@@ -55,4 +58,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # Run the application
 CMD ["./open-telemorph-prime"]
+
 

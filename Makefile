@@ -16,8 +16,15 @@ build-ui:
 	cd frontend && npm install && npm run build
 	@echo "✅ UI build complete!"
 
+# Copy frontend dist to backend/dist for embedding (requires build-ui first)
+copy-frontend-dist: build-ui
+	@echo "📦 Copying frontend dist to backend/dist..."
+	@rm -rf backend/dist
+	@cp -r frontend/dist backend/dist
+	@echo "✅ Frontend dist copied!"
+
 # Build the binary (builds frontend first, then embeds it in Go binary)
-build: build-ui
+build: copy-frontend-dist
 	@echo "🔨 Building $(BINARY_NAME)..."
 	cd backend && go build -o ../$(BINARY_NAME) .
 	@echo "✅ Build complete!"
@@ -27,8 +34,8 @@ run: build
 	@echo "🚀 Starting $(BINARY_NAME)..."
 	./$(BINARY_NAME)
 
-# Run in development mode
-dev:
+# Run in development mode (requires frontend/dist to be copied to backend/dist)
+dev: copy-frontend-dist
 	@echo "🔧 Running in development mode..."
 	cd backend && go run main.go -config ../config.yaml
 
@@ -48,6 +55,7 @@ clean:
 	rm -f $(BINARY_NAME)
 	rm -rf data/
 	rm -rf frontend/dist/
+	rm -rf backend/dist/
 	rm -rf frontend/node_modules/
 	@echo "✅ Clean complete!"
 
@@ -120,4 +128,5 @@ help:
 	@echo "  data-dir        Create data directory"
 	@echo "  setup           Setup development environment"
 	@echo "  help            Show this help message"
+
 
