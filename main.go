@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,10 +12,12 @@ import (
 
 	"open-telemorph-prime/internal/config"
 	"open-telemorph-prime/internal/ingestion"
+	"open-telemorph-prime/internal/logger"
 	"open-telemorph-prime/internal/storage"
 	"open-telemorph-prime/internal/web"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 var (
@@ -30,13 +31,24 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		// Use standard log for fatal errors before logger is initialized
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+		os.Exit(1)
 	}
+
+	// Initialize logger with configuration
+	if err := logger.Init(cfg.Logging.Level, cfg.Logging.Format, cfg.Logging.FilePath); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer logger.Sync()
+
+	log := logger.Get()
 
 	// Initialize storage
 	storage, err := storage.NewSQLiteStorage(cfg.Storage)
 	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+		log.Fatal("Failed to initialize storage", zap.Error(err))
 	}
 	defer storage.Close()
 
@@ -73,15 +85,18 @@ func main() {
 	// Start ingestion service
 	go func() {
 		if err := ingestionService.Start(); err != nil {
-			log.Fatalf("Failed to start ingestion service: %v", err)
+			log.Fatal("Failed to start ingestion service", zap.Error(err))
 		}
 	}()
 
 	// Start HTTP server
 	go func() {
-		log.Printf("Starting Open-Telemorph-Prime server on port %d", cfg.Server.Port)
+		log.Info("Starting Open-Telemorph-Prime server",
+			zap.Int("port", cfg.Server.Port),
+			zap.String("environment", cfg.Server.Environment),
+		)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			log.Fatal("Failed to start server", zap.Error(err))
 		}
 	}()
 
@@ -90,22 +105,22 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down Open-Telemorph-Prime...")
+	log.Info("Shutting down Open-Telemorph-Prime...")
 
 	// Shutdown ingestion service
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := ingestionService.Stop(ctx); err != nil {
-		log.Printf("Error stopping ingestion service: %v", err)
+		log.Error("Error stopping ingestion service", zap.Error(err))
 	}
 
 	// Shutdown HTTP server
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Error shutting down server: %v", err)
+		log.Error("Error shutting down server", zap.Error(err))
 	}
 
-	log.Println("Open-Telemorph-Prime stopped")
+	log.Info("Open-Telemorph-Prime stopped")
 }
 
 func registerRoutes(router *gin.Engine, ingestionService *ingestion.Service, webService *web.Service) {

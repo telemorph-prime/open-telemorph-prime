@@ -4,15 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"time"
 
 	"open-telemorph-prime/internal/config"
+	"open-telemorph-prime/internal/logger"
 	"open-telemorph-prime/internal/storage"
 
 	"github.com/gin-gonic/gin"
+	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -21,12 +23,14 @@ type Service struct {
 	config     config.IngestionConfig
 	httpServer *http.Server
 	grpcServer *grpc.Server
+	logger     *zap.Logger
 }
 
 func NewService(storage storage.Storage, config config.IngestionConfig) *Service {
 	return &Service{
 		storage: storage,
 		config:  config,
+		logger:  logger.Get(),
 	}
 }
 
@@ -34,17 +38,23 @@ func (s *Service) Start() error {
 	// Start HTTP server for OTLP HTTP endpoints if enabled
 	if s.config.HTTPEnabled {
 		go s.startHTTPServer()
-		log.Printf("OTLP HTTP server enabled on port %d", s.config.HTTPPort)
+		s.logger.Info("OTLP HTTP server enabled",
+			zap.Int("port", s.config.HTTPPort),
+			zap.String("protocol", "http"),
+		)
 	} else {
-		log.Printf("OTLP HTTP server disabled")
+		s.logger.Info("OTLP HTTP server disabled")
 	}
 
 	// Start gRPC server for OTLP gRPC endpoints if enabled
 	if s.config.GRPCEnabled {
 		go s.startGRPCServer()
-		log.Printf("OTLP gRPC server enabled on port %d", s.config.GRPCPort)
+		s.logger.Info("OTLP gRPC server enabled",
+			zap.Int("port", s.config.GRPCPort),
+			zap.String("protocol", "grpc"),
+		)
 	} else {
-		log.Printf("OTLP gRPC server disabled")
+		s.logger.Info("OTLP gRPC server disabled")
 	}
 
 	return nil
@@ -70,9 +80,15 @@ func (s *Service) startHTTPServer() {
 		Handler: router,
 	}
 
-	log.Printf("Starting OTLP HTTP server on port %d", s.config.HTTPPort)
+	s.logger.Info("Starting OTLP HTTP server",
+		zap.Int("port", s.config.HTTPPort),
+		zap.String("protocol", "http"),
+	)
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Printf("Failed to start OTLP HTTP server: %v", err)
+		s.logger.Error("Failed to start OTLP HTTP server",
+			zap.Error(err),
+			zap.Int("port", s.config.HTTPPort),
+		)
 	}
 }
 
@@ -80,7 +96,10 @@ func (s *Service) startGRPCServer() {
 	// Create a listener on the gRPC port
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", s.config.GRPCPort))
 	if err != nil {
-		log.Printf("Failed to listen on gRPC port %d: %v", s.config.GRPCPort, err)
+		s.logger.Error("Failed to listen on gRPC port",
+			zap.Error(err),
+			zap.Int("port", s.config.GRPCPort),
+		)
 		return
 	}
 
@@ -94,19 +113,27 @@ func (s *Service) startGRPCServer() {
 	// - metricsservice.RegisterMetricsServiceServer(s.grpcServer, s)
 	// - logsservice.RegisterLogsServiceServer(s.grpcServer, s)
 
-	log.Printf("Starting OTLP gRPC server on port %d", s.config.GRPCPort)
+	s.logger.Info("Starting OTLP gRPC server",
+		zap.Int("port", s.config.GRPCPort),
+		zap.String("protocol", "grpc"),
+	)
 	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Printf("Failed to start gRPC server: %v", err)
+		s.logger.Error("Failed to start gRPC server",
+			zap.Error(err),
+			zap.Int("port", s.config.GRPCPort),
+		)
 	}
 }
 
 func (s *Service) Stop(ctx context.Context) error {
-	log.Println("Stopping ingestion service...")
+	s.logger.Info("Stopping ingestion service...")
 
 	// Shutdown HTTP server
 	if s.httpServer != nil {
 		if err := s.httpServer.Shutdown(ctx); err != nil {
-			log.Printf("Error shutting down OTLP HTTP server: %v", err)
+			s.logger.Error("Error shutting down OTLP HTTP server",
+				zap.Error(err),
+			)
 		}
 	}
 
@@ -182,7 +209,11 @@ func (s *Service) HandleTraces(c *gin.Context) {
 				}
 
 				if err := s.storage.InsertTrace(trace); err != nil {
-					log.Printf("Failed to insert trace: %v", err)
+					s.logger.Error("Failed to insert trace",
+						zap.Error(err),
+						zap.String("trace_id", trace.TraceID),
+						zap.String("span_id", trace.SpanID),
+					)
 				}
 			}
 		}
@@ -259,7 +290,11 @@ func (s *Service) HandleMetrics(c *gin.Context) {
 					}
 
 					if err := s.storage.InsertMetric(metricData); err != nil {
-						log.Printf("Failed to insert metric: %v", err)
+						s.logger.Error("Failed to insert metric",
+							zap.Error(err),
+							zap.String("metric_name", metricData.MetricName),
+							zap.String("service_name", metricData.ServiceName),
+						)
 					}
 				}
 
@@ -275,7 +310,11 @@ func (s *Service) HandleMetrics(c *gin.Context) {
 					}
 
 					if err := s.storage.InsertMetric(metricData); err != nil {
-						log.Printf("Failed to insert metric: %v", err)
+						s.logger.Error("Failed to insert metric",
+							zap.Error(err),
+							zap.String("metric_name", metricData.MetricName),
+							zap.String("service_name", metricData.ServiceName),
+						)
 					}
 				}
 			}
@@ -345,7 +384,11 @@ func (s *Service) HandleLogs(c *gin.Context) {
 				}
 
 				if err := s.storage.InsertLog(logData); err != nil {
-					log.Printf("Failed to insert log: %v", err)
+					s.logger.Error("Failed to insert log",
+						zap.Error(err),
+						zap.String("service_name", logData.ServiceName),
+						zap.String("level", logData.Level),
+					)
 				}
 			}
 		}
@@ -363,8 +406,11 @@ func extractServiceNameFromResource(resource struct {
 		} `json:"value"`
 	} `json:"attributes"`
 }) string {
+	// Use OpenTelemetry semantic convention for service name
+	// ServiceNameKey is an attribute.Key, convert to string for comparison
+	serviceNameKey := string(semconv.ServiceNameKey)
 	for _, attr := range resource.Attributes {
-		if attr.Key == "service.name" {
+		if attr.Key == serviceNameKey {
 			return attr.Value.StringValue
 		}
 	}
